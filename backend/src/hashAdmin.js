@@ -1,7 +1,7 @@
-// src/hashAdmin.js
-const hashPassword = require('./utils/hashPassword');
+const bcrypt = require("bcrypt");
 
 (async () => {
-  const hashed = await hashPassword('admin123');
-  console.log('Hashed password:', hashed);
+  const hashed = await bcrypt.hash("123456", 10);  // 👈 employee password
+  console.log("Hashed password:");
+  console.log(hashed);
 })();
