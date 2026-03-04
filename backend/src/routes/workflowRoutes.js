@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../config/db');
 const authorize = require('../middleware/authMiddleware');
 
+
 // =====================================================
 // Admin: Create Workflow + Steps
 // =====================================================
@@ -19,17 +20,21 @@ router.post('/create-workflow', authorize(['Admin']), async (req, res) => {
 
     for (const step of steps) {
       await pool.query(
-        'INSERT INTO workflow_steps (workflow_id, step_name, role_id, step_order) VALUES ($1, $2, $3, $4)',
+        `INSERT INTO workflow_steps 
+         (workflow_id, step_name, role_id, step_order) 
+         VALUES ($1, $2, $3, $4)`,
         [workflow.id, step.step_name, step.role_id, step.step_order]
       );
     }
 
     res.json({ message: 'Workflow created with steps', workflow });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 
 // =====================================================
 // Get Available Workflows for Employee
@@ -39,12 +44,15 @@ router.get('/available', authorize(['Employee']), async (req, res) => {
     const result = await pool.query(
       'SELECT id, name, description FROM workflows ORDER BY created_at DESC'
     );
+
     res.json(result.rows);
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 
 // =====================================================
 // Employee: Submit Workflow Request
@@ -54,18 +62,22 @@ router.post('/submit-request', authorize(['Employee']), async (req, res) => {
   const user_id = req.user.id;
 
   try {
-    // Set first step = 1, status = Pending
     const result = await pool.query(
-      'INSERT INTO workflow_requests (workflow_id, user_id, current_step, status) VALUES ($1, $2, $3, $4) RETURNING *',
+      `INSERT INTO workflow_requests 
+       (workflow_id, user_id, current_step, status) 
+       VALUES ($1, $2, $3, $4) 
+       RETURNING *`,
       [workflow_id, user_id, 1, 'Pending']
     );
 
     res.json({ message: 'Workflow request submitted', request: result.rows[0] });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 
 // =====================================================
 // Employee: Get My Requests
@@ -75,49 +87,63 @@ router.get('/my-requests', authorize(['Employee']), async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT wr.*, w.name AS workflow_name
+      `SELECT wr.*, 
+              w.name AS workflow_name
        FROM workflow_requests wr
-       LEFT JOIN workflows w ON wr.workflow_id = w.id
+       LEFT JOIN workflows w 
+         ON wr.workflow_id = w.id
        WHERE wr.user_id = $1
        ORDER BY wr.created_at DESC`,
       [user_id]
     );
 
     res.json(result.rows);
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
+
 // =====================================================
 // Manager / HR / Finance / Admin: Get Pending Approvals
 // =====================================================
-router.get('/pending-approvals', authorize(['Manager', 'HR', 'Finance', 'Admin']), async (req, res) => {
+router.get('/pending-approvals', authorize(['Manager', 'Finance', 'Admin', 'HR']), async (req, res) => {
   const user_role = req.user.role;
 
   try {
     const result = await pool.query(
-      `SELECT wr.id AS request_id, wr.user_id, wr.status, wr.current_step,
-              w.name AS workflow_name, ws.step_name, ws.step_order
+      `SELECT wr.*, 
+              w.name AS workflow_name, 
+              ws.step_name, 
+              ws.step_order,
+              u.name AS requested_by_name,
+              u.email AS requested_by_email
        FROM workflow_requests wr
-       JOIN workflow_steps ws
-         ON ws.workflow_id = wr.workflow_id
-        AND ws.step_order = wr.current_step
-       JOIN roles r
-         ON r.id = ws.role_id
-       WHERE wr.status = 'Pending'
+       JOIN workflow_steps ws 
+         ON ws.workflow_id = wr.workflow_id 
+        AND wr.current_step = ws.step_order
+       JOIN roles r 
+         ON ws.role_id = r.id
+       JOIN workflows w
+         ON wr.workflow_id = w.id
+       JOIN users u
+         ON wr.user_id = u.id
+       WHERE wr.status = 'Pending' 
          AND r.name = $1
        ORDER BY wr.created_at DESC`,
       [user_role]
     );
 
     res.json(result.rows);
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 
 // =====================================================
 // Approve Workflow Request
@@ -128,45 +154,62 @@ router.post('/requests/:id/approve', authorize(['Manager', 'HR', 'Finance', 'Adm
   const user_id = req.user.id;
 
   try {
-    const requestResult = await pool.query('SELECT * FROM workflow_requests WHERE id = $1', [request_id]);
-    if (requestResult.rows.length === 0) return res.status(404).json({ message: 'Request not found' });
+    const requestResult = await pool.query(
+      'SELECT * FROM workflow_requests WHERE id = $1',
+      [request_id]
+    );
+
+    if (requestResult.rows.length === 0)
+      return res.status(404).json({ message: 'Request not found' });
 
     const request = requestResult.rows[0];
 
-    // Verify current step role
     const stepResult = await pool.query(
       `SELECT ws.*
        FROM workflow_steps ws
        JOIN roles r ON ws.role_id = r.id
-       WHERE ws.workflow_id = $1 AND ws.step_order = $2 AND r.name = $3`,
+       WHERE ws.workflow_id = $1 
+         AND ws.step_order = $2 
+         AND r.name = $3`,
       [request.workflow_id, request.current_step, user_role]
     );
 
-    if (stepResult.rows.length === 0) return res.status(403).json({ message: 'Not authorized to approve this step' });
+    if (stepResult.rows.length === 0)
+      return res.status(403).json({ message: 'Not authorized to approve this step' });
 
-    // Log action
     await pool.query(
       'INSERT INTO request_logs (request_id, action, performed_by) VALUES ($1, $2, $3)',
       [request_id, 'Approved', user_id]
     );
 
-    // Move to next step or mark approved
-    const maxStepResult = await pool.query('SELECT MAX(step_order) AS max_step FROM workflow_steps WHERE workflow_id = $1', [request.workflow_id]);
-    const maxStep = parseInt(maxStepResult.rows[0].max_step, 10);
+    const maxStepResult = await pool.query(
+      'SELECT MAX(step_order) AS max_step FROM workflow_steps WHERE workflow_id = $1',
+      [request.workflow_id]
+    );
 
+    const maxStep = parseInt(maxStepResult.rows[0].max_step, 10);
     const nextStep = request.current_step + 1;
+
     if (nextStep > maxStep) {
-      await pool.query('UPDATE workflow_requests SET status = $1 WHERE id = $2', ['Approved', request_id]);
+      await pool.query(
+        'UPDATE workflow_requests SET status = $1 WHERE id = $2',
+        ['Approved', request_id]
+      );
     } else {
-      await pool.query('UPDATE workflow_requests SET current_step = $1 WHERE id = $2', [nextStep, request_id]);
+      await pool.query(
+        'UPDATE workflow_requests SET current_step = $1 WHERE id = $2',
+        [nextStep, request_id]
+      );
     }
 
     res.json({ message: 'Workflow request approved successfully' });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 
 // =====================================================
 // Reject Workflow Request
@@ -177,8 +220,13 @@ router.post('/requests/:id/reject', authorize(['Manager', 'HR', 'Finance', 'Admi
   const user_id = req.user.id;
 
   try {
-    const requestResult = await pool.query('SELECT * FROM workflow_requests WHERE id = $1', [request_id]);
-    if (requestResult.rows.length === 0) return res.status(404).json({ message: 'Request not found' });
+    const requestResult = await pool.query(
+      'SELECT * FROM workflow_requests WHERE id = $1',
+      [request_id]
+    );
+
+    if (requestResult.rows.length === 0)
+      return res.status(404).json({ message: 'Request not found' });
 
     const request = requestResult.rows[0];
 
@@ -186,25 +234,33 @@ router.post('/requests/:id/reject', authorize(['Manager', 'HR', 'Finance', 'Admi
       `SELECT ws.*
        FROM workflow_steps ws
        JOIN roles r ON ws.role_id = r.id
-       WHERE ws.workflow_id = $1 AND ws.step_order = $2 AND r.name = $3`,
+       WHERE ws.workflow_id = $1 
+         AND ws.step_order = $2 
+         AND r.name = $3`,
       [request.workflow_id, request.current_step, user_role]
     );
 
-    if (stepResult.rows.length === 0) return res.status(403).json({ message: 'Not authorized to reject this step' });
+    if (stepResult.rows.length === 0)
+      return res.status(403).json({ message: 'Not authorized to reject this step' });
 
     await pool.query(
       'INSERT INTO request_logs (request_id, action, performed_by) VALUES ($1, $2, $3)',
       [request_id, 'Rejected', user_id]
     );
 
-    await pool.query('UPDATE workflow_requests SET status = $1 WHERE id = $2', ['Rejected', request_id]);
+    await pool.query(
+      'UPDATE workflow_requests SET status = $1 WHERE id = $2',
+      ['Rejected', request_id]
+    );
 
     res.json({ message: 'Workflow request rejected successfully' });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 
 // =====================================================
 // View Request History
@@ -214,15 +270,19 @@ router.get('/requests/:id/history', authorize(['Admin', 'Manager', 'HR', 'Financ
 
   try {
     const result = await pool.query(
-      `SELECT rl.*, u.name AS performed_by_name, u.email AS performed_by_email
+      `SELECT rl.*, 
+              u.name AS performed_by_name, 
+              u.email AS performed_by_email
        FROM request_logs rl
-       LEFT JOIN users u ON rl.performed_by = u.id
+       LEFT JOIN users u 
+         ON rl.performed_by = u.id
        WHERE rl.request_id = $1
        ORDER BY rl.timestamp ASC`,
       [request_id]
     );
 
     res.json(result.rows);
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
