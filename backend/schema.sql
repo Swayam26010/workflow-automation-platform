@@ -1,0 +1,50 @@
+-- USERS TABLE
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(150) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    role VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ROLES TABLE
+CREATE TABLE IF NOT EXISTS roles (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50) UNIQUE NOT NULL
+);
+
+-- WORKFLOWS TABLE
+CREATE TABLE IF NOT EXISTS workflows (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(150) NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- WORKFLOW STEPS
+CREATE TABLE IF NOT EXISTS workflow_steps (
+    id SERIAL PRIMARY KEY,
+    workflow_id INTEGER REFERENCES workflows(id) ON DELETE CASCADE,
+    step_order INTEGER NOT NULL,
+    role VARCHAR(50) NOT NULL
+);
+
+-- REQUESTS
+CREATE TABLE IF NOT EXISTS workflow_requests (
+    id SERIAL PRIMARY KEY,
+    workflow_id INTEGER REFERENCES workflows(id),
+    user_id INTEGER REFERENCES users(id),
+    status VARCHAR(100) DEFAULT 'Submitted',
+    current_step INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- AUDIT LOGS
+CREATE TABLE IF NOT EXISTS request_logs (
+    id SERIAL PRIMARY KEY,
+    request_id INTEGER REFERENCES workflow_requests(id) ON DELETE CASCADE,
+    action VARCHAR(100),
+    performed_by INTEGER REFERENCES users(id),
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
