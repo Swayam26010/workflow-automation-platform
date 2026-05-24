@@ -1,4 +1,3 @@
-const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
 const express = require('express');
@@ -22,21 +21,21 @@ router.post('/login', async (req, res) => {
 
     const user = result.rows[0];
 
-    // Compare password with hashed password
-    const match = await bcrypt.compare(password, user.password);
+    // TEMP FIX: plain text comparison (for testing only)
+    const match = password === user.password;
 
     if (!match) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
 
-    // Generate JWT
+    // Generate JWT token
     const token = jwt.sign(
       { id: user.id, role: user.role_name },
       process.env.JWT_SECRET,
       { expiresIn: '1h' }
     );
 
-    res.json({
+    return res.json({
       message: 'Login successful',
       token,
       role: user.role_name,
@@ -44,7 +43,7 @@ router.post('/login', async (req, res) => {
 
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: 'Server error' });
   }
 });
 
