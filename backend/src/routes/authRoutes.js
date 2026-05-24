@@ -22,12 +22,10 @@ router.post('/login', async (req, res) => {
 
     const user = result.rows[0];
 
-    // 🔐 Compare entered password with hashed password
+    // Compare password with hashed password
+    const match = await bcrypt.compare(password, user.password);
 
-   const match = await bcrypt.compare(password, user.password);
-   
-    if (!match) 
-    {
+    if (!match) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
 
